@@ -5,7 +5,7 @@
 // 里的 BlurStyle.*），扩展进程自己就会在加载时崩掉——而官方写明"
 // FaultLogExtensionAbility 自身崩溃时，不会再次被系统服务拉起"，那就等于这条
 // 救命通道彻底断了。所以这里只依赖 CoreFileKit / NetworkKit / ApiCredentials
-// （后者只依赖同目录的 credCodec，没有别的）。
+// （后者只导出几个字符串常量，没有别的依赖）。
 //
 // **只留不含用户内容的字段。** 崩溃事件里的 hilog 刻意不碰：
 //   hilog —— 崩溃前最多 1000 行本应用的流水日志。我们的日志里有 [StoreDiag]

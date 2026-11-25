@@ -36,7 +36,11 @@ entry/src/main/ets/
   util/              解析/格式化工具（富文本、相册、日期……）
 entry/src/main/cpp/  原生桥（libentry.so → libtdjson.so / libtgcalls_ohos.so）
 entry/src/test/      单元测试（通过 scripts/run-local-tests.sh 运行）
-scripts/             TDLib/tgcalls 拉取与编译脚本、本地测试门禁
+libs/                ijkplayer-2.0.13-pg.10.har（由 oh-package.json5 引用）
+entry/libs/arm64-v8a/ 预编译 libentry.so / libtdjson.so / libtgcalls_ohos.so
+third_party/         libvpx-ohos/、rlottie-ohos/ 静态库与头文件
+scripts/             可选的重建脚本（TDLib/tgcalls/libvpx/rlottie/ijkplayer）、
+                     本地测试门禁
 ```
 
 ## 构建
@@ -44,73 +48,105 @@ scripts/             TDLib/tgcalls 拉取与编译脚本、本地测试门禁
 ### 环境要求
 
 - **DevEco Studio 6.0+**，含自带的 OpenHarmony SDK/NDK
-- `curl` 与 `file`（macOS/Linux 自带）
+- HarmonyOS NEXT 设备或模拟器（arm64-v8a）
+- 华为开发者账号（仅"自动签名"这一步需要）
 
-### 1. 原生库
+构建前不需要额外安装任何东西：原生库与 ijkplayer 包都已在仓库里。
 
-应用以预编译原生库的形式内置 TDLib 和 tgcalls，路径为 `entry/libs/arm64-v8a/`
-（合计约 50 MB，未提交到仓库）。`libentry.so` 同时链接这两个库，**缺任何一个都会
-让构建停在** ninja 的 `missing and no known rule to make it`。
+### 1. 原生库（已随仓库提供）
 
-**方式 A —— 下载预编译产物（推荐）：**
+`libentry.so` 依赖的全部产物都已入库，clone 之后既不需要下载，也不需要编译：
 
-```bash
-bash scripts/fetch-libs.sh [tag]   # 两个库一起从本仓库的 GitHub Releases 下载
-```
+| 路径 | 内容 |
+| --- | --- |
+| `entry/libs/arm64-v8a/` | `libentry.so`（N-API 桥）、`libtdjson.so`（约 33 MB）、`libtgcalls_ohos.so`（约 18 MB） |
+| `third_party/libvpx-ohos/` | `libvpx.a` 与头文件 |
+| `third_party/rlottie-ohos/` | `librlottie.a` 与头文件 |
+| `libs/` | `ijkplayer-2.0.13-pg.10.har`，由 `oh-package.json5` 引用 |
 
-不带参数时脚本会自动解析最新的 Release。不要退回用滚动 tag `tdlib-latest`：
-它的 `libtdjson.so` 保持更新，但 `libtgcalls_ohos.so` 落后于各个版本化 Release。
+由此可得：
 
-**方式 B —— 从源码编译（较新的 Mac 上约 10-15 分钟）：**
+- **不需要**运行 `scripts/fetch-libs.sh`、`scripts/fetch-tdlib.sh`、
+  `scripts/fetch-ijkplayer.sh`、`scripts/build-tdlib.sh`、
+  `scripts/build-tgcalls-ohos.sh`、`scripts/build-libvpx-ohos.sh`、
+  `scripts/build-rlottie-ohos.sh`。这些脚本仅保留用于从源码重建，需要 OHOS NDK
+  工具链（clang、cmake、ninja、gperf、patchelf），且首次构建 WebRTC 耗时很长。
+- `entry/build-profile.json5` 不声明 `externalNativeOptions`，hvigor 不会编译
+  C++ 桥，而是把预编译的 `libentry.so` 原样打包。重建它属于独立且少见的步骤，
+  见本节末尾。
+- 版本参考：TDLib 1.8.65；tgcalls 见
+  [`scripts/tgcalls/README.md`](scripts/tgcalls/README.md)；ijkplayer
+  `2.0.13-pg.10`，异步释放补丁为 `scripts/ijkplayer-pg10-async-release.patch`。
 
-```bash
-# 需要 clang（Xcode CLT）、cmake、ninja、gperf、patchelf
-export OHOS_NDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony
-bash scripts/build-tdlib.sh
-bash scripts/build-tgcalls-ohos.sh
-```
+### 2. Telegram API 凭据（需自行注册）
 
-`build-tdlib.sh` 端到端封装了
-[`ErBWs/tdlib-ohos-build`](https://github.com/ErBWs/tdlib-ohos-build)：用 DevEco
-NDK 为 arm64-v8a 交叉编译 OpenSSL（静态，`1_1_1w`）与 TDLib（release **1.8.65**），
-在宿主机预先生成 TDLib 的 TL-schema 源码（交叉编译时必需），用 `patchelf` 把
-SONAME 规范化为 `libtdjson.so` —— 不做这一步，原生桥会**静默**加载失败。脚本是
-幂等的，可以放心重复执行。
+本仓库**不包含**任何 `api_id`/`api_hash`，也不包含任何生成、打包或混淆它们的
+脚本。没有你自己申请的凭据，TDLib 无法登录：
 
-`build-tgcalls-ohos.sh` 首次运行需下载并编译 WebRTC，耗时较长；版本固定和当前
-媒体能力边界见 [`scripts/tgcalls/README.md`](scripts/tgcalls/README.md)。
-
-### 2. Telegram API 凭据
-
-TDLib 需要你自己的 `api_id`/`api_hash` —— 本仓库不提供任何凭据。
-
-1. 在 <https://my.telegram.org/apps> 注册一个应用。
+1. 在 <https://my.telegram.org/apps> 注册一个应用，页面会给出 `api_id`（数字）
+   与 `api_hash`（32 位十六进制）。
 2. 把 `entry/src/main/ets/tdkit/ApiCredentials.template.ets` 复制为同目录下的
    `ApiCredentials.ets`。
-3. 生成打包后的常量，并把打印出来的三个值粘贴进去：
+3. 在这份副本里填写两个明文常量：
 
-   ```bash
-   node scripts/gen-creds.mjs <api_id> <api_hash>
+   ```ts
+   export const apiId: number = 1234567;                              // 你的 api_id
+   export const apiHash: string = '0123456789abcdef0123456789abcdef'; // 你的 api_hash
    ```
 
-`ApiCredentials.ets` 已被 gitignore —— **切勿提交真实凭据**，一旦泄露请立即吊销
-重建。这里的打包只做混淆（并非加密），仅用于提高从安装包中随手提取的门槛。
+   同一文件还带四个可选字段 —— `pushRelayBase`、`pushRelayToken`、
+   `crashReportBase`、`crashReportToken` —— 除非你自建推送中转或崩溃上报接收端，
+   否则保持空串即可。留空只会隐藏对应功能，不影响其它任何部分。
+4. 直接构建。没有其它文件读取这两个值，构建过程也不需要联网。
+
+`**/ApiCredentials.ets` 已写入 `.gitignore`，填好的副本不会被误提交 ——
+**切勿提交真实凭据**，一旦泄露请立即吊销并重新注册。也不要贴到 issue、截图或
+日志里：它们标识的是你的应用而非账号，但同样不宜公开。
 
 ### 3. 签名
 
-`build-profile.json5` 中的 `signingConfigs` 为空。用 DevEco Studio 打开项目，通过
-**File > Project Structure > Signing Configs > Support HarmonyOS Auto-Sign**
-（需要华为开发者账号）在本地生成调试证书。任何签名材料都不需要提交或分享。
+`build-profile.json5` 中的 `signingConfigs` 为空，仓库里没有任何证书、密钥库或
+Profile：
+
+1. 用 DevEco Studio 打开工程。
+2. 进入 **File > Project Structure > Signing Configs**，勾选
+   **Automatically generate signature**（HarmonyOS 自动签名，要求 IDE 已登录
+   华为开发者账号）。
+3. 由 DevEco Studio 为 `com.ohtelegram.client` 生成调试证书与 Profile，产物存放
+   在你的用户目录下，不在仓库内。
+
+构建产物同样不入库：HAP 只出现在 `entry/build/` 下，该目录已被 gitignore。
+
+上游源码曾把本地证书、密钥库与 Profile 的绝对路径连同密钥库口令以明文形式提交进
+仓库，本仓库已全部移除。如果你基于上游构建，请视为这些材料已泄露：务必自行生成
+证书，不要复用任何已公开的密钥库或口令。
 
 ### 4. 构建与运行
 
-用 DevEco Studio 打开并在 HarmonyOS NEXT 设备/模拟器上运行，或使用命令行：
+整个流程就是 DevEco Studio 里的四步：
 
-```bash
-hvigorw assembleHap --no-daemon
-```
+1. **打开工程** —— `File > Open` 选择仓库根目录（含 `build-profile.json5` 的那
+   一层），等 IDE 打开时自动执行的同步（含 `ohpm install`）跑完。
+2. **配置签名** —— 见上文第 3 步。
+3. **构建 HAP** —— `Build > Build Hap(s)/APP(s) > Build Hap(s)`，或在 `PATH` 含
+   `hvigorw` 的终端执行 `hvigorw assembleHap --no-daemon`。产物位于
+   `entry/build/default/outputs/default/`。
+4. **运行到设备** —— 连接已开启 USB 调试的 HarmonyOS NEXT 设备（或启动模拟
+   器），在设备选择器中选中它并点击 **Run**。首次启动要求输入手机号与 Telegram
+   下发的登录码，其余由 TDLib 完成。
 
-运行测试门禁：
+因为不声明 `externalNativeOptions`，这条链路打包的是 `entry/libs/arm64-v8a/` 里
+的预编译 `libentry.so`，不编译桥接层。构建前、构建中、构建后都不需要运行任何
+`fetch-*` / `build-*` 脚本。
+
+可选，仅在改动 C++ 源码后需要：把指向 `entry/src/main/cpp`、
+`abiFilters: ["arm64-v8a"]` 的 `externalNativeOptions` 加回
+`entry/build-profile.json5`（CMake 工程与 `entry` 共享目标仍在树内，
+`project(Petrelgram)`），构建一次让 cmake/ninja 产出 `libentry.so`，复制到
+`entry/libs/arm64-v8a/`，再把这个选项去掉。把桥接层排除在应用构建之外是有意为之：
+它是几千行很少改动的 C++，而 HAP 构建每天要跑很多次。
+
+可选自检，仅面向贡献者（需要 Node.js，不属于应用构建）：
 
 ```bash
 ./scripts/run-local-tests.sh    # 必须输出 "LOCAL TESTS: PASS"

@@ -152,15 +152,18 @@ full-page router jump.
   auto-signing; nothing needs to be committed or shared.
 - `entry/build-profile.json5` no longer declares `externalNativeOptions`, so
   hvigor does not build the C++ bridge during an app build; `libentry.so` is
-  linked ahead of time and dropped into `entry/libs/arm64-v8a/`. Building a HAP
-  therefore requires the prebuilt libraries to be present, and a *rebuild* of
-  `libentry.so` requires the static libraries below.
-- `entry/libs/` and `third_party/` are gitignored: the three shared objects
-  (`libtdjson.so`, `libtgcalls_ohos.so`, `libentry.so`, ~53 MB together), the
-  `libvpx.a` / `librlottie.a` static libraries and the ijkplayer `.har` are all
-  produced locally by the scripts in `scripts/`.
+  linked ahead of time and dropped into `entry/libs/arm64-v8a/`. A HAP build only
+  needs those prebuilt libraries to be present — they are in the tree — while a
+  *rebuild* of `libentry.so` also needs the static libraries below.
+- The prebuilt native libraries **ship with the repository**: `libentry.so`,
+  `libtdjson.so` and `libtgcalls_ohos.so` in `entry/libs/arm64-v8a/` (~52 MB
+  together), `libvpx.a` / `librlottie.a` under `third_party/`, and the ijkplayer
+  `.har` under `libs/`. A fresh clone therefore builds without running any
+  fetch or build script; the scripts in `scripts/` are kept for rebuilding those
+  artifacts from source.
 - `hvigor/hvigor-config.json5` pins `hvigor-ohos-plugin` 6.26.4 explicitly, and
-  the ijkplayer dependency resolves to the local `libs/ijkplayer-2.0.13.har`.
+  the ijkplayer dependency resolves to the local
+  `libs/ijkplayer-2.0.13-pg.10.har`.
 - `services/UpdateChecker.ets` gets an `UPDATE_CHECK_ENABLED` switch, set to
   `false`: the upstream GitHub release feed is no longer valid, so the checker
   neither restores a cached "update available" state nor issues a request, and
@@ -218,9 +221,11 @@ entry/src/main/ets/
 entry/src/main/cpp/  native bridge (libentry.so → libtdjson.so / libtgcalls_ohos.so /
                      libvpx.a / librlottie.a)
 entry/src/test/      unit tests (run via scripts/run-local-tests.sh)
-scripts/             TDLib/tgcalls/libvpx/rlottie/ijkplayer fetch and build
-                     scripts, i18n tooling, local test gate
-third_party/         locally built static libraries (not committed)
+libs/                ijkplayer-2.0.13-pg.10.har (referenced by oh-package.json5)
+entry/libs/arm64-v8a/ prebuilt libentry.so / libtdjson.so / libtgcalls_ohos.so
+third_party/         libvpx-ohos/ and rlottie-ohos/ static libraries + headers
+scripts/             optional rebuild scripts for TDLib, tgcalls, libvpx,
+                     rlottie and ijkplayer; i18n tooling; local test gate
 ```
 
 ## Building
@@ -228,87 +233,85 @@ third_party/         locally built static libraries (not committed)
 ### Requirements
 
 - **DevEco Studio 6.0+** with its bundled OpenHarmony SDK/NDK
-- `curl` and `file` (preinstalled on macOS/Linux)
+- A HarmonyOS NEXT device or emulator (arm64-v8a)
+- A Huawei developer account, needed only for the automatic signing step
 
-### 1. Native libraries
+Nothing else has to be installed before building: the native libraries and the
+ijkplayer package are already in the tree.
 
-The app bundles TDLib, tgcalls and the N-API bridge as prebuilt native
-libraries in `entry/libs/arm64-v8a/` (~53 MB, not committed). `libentry.so`
-links against `libtdjson.so`, `libtgcalls_ohos.so` and the two static
-libraries — **missing any of them stops the build** at ninja's
-`missing and no known rule to make it`, or at link time when rebuilding
-`libentry.so`.
+### 1. Native libraries (already in the repository)
 
-**Option A — download the two TDLib/tgcalls libraries:**
+Everything `libentry.so` links against ships with the repository, so a fresh
+clone needs no download and no compilation:
 
-```bash
-bash scripts/fetch-libs.sh [tag]
-```
+| Path | Contents |
+| --- | --- |
+| `entry/libs/arm64-v8a/` | `libentry.so` (N-API bridge), `libtdjson.so` (~33 MB), `libtgcalls_ohos.so` (~18 MB) |
+| `third_party/libvpx-ohos/` | `libvpx.a` + headers |
+| `third_party/rlottie-ohos/` | `librlottie.a` + headers |
+| `libs/` | `ijkplayer-2.0.13-pg.10.har`, referenced by `oh-package.json5` |
 
-The script pulls `libtdjson.so` and `libtgcalls_ohos.so` from the release
-artifacts published by the upstream project
-([`miramira8295/TelegramForHarmony`](https://github.com/miramira8295/TelegramForHarmony)).
-With no argument it resolves the latest release tag through the GitHub API, so it
-needs network access and fails with a clear message when rate-limited. Do not
-fall back to a rolling `tdlib-latest` tag: its `libtdjson.so` stays current but
-its `libtgcalls_ohos.so` lags behind the versioned releases.
+Consequences:
 
-`libentry.so` is **not** part of those artifacts — it is this project's own N-API
-bridge and has to be built locally once (see step 4).
+- You do **not** need to run `scripts/fetch-libs.sh`, `scripts/fetch-tdlib.sh`,
+  `scripts/fetch-ijkplayer.sh`, `scripts/build-tdlib.sh`,
+  `scripts/build-tgcalls-ohos.sh`, `scripts/build-libvpx-ohos.sh` or
+  `scripts/build-rlottie-ohos.sh`. They are kept only for rebuilding the
+  artifacts from source, which needs an OHOS NDK toolchain (clang, cmake, ninja,
+  gperf, patchelf) and a long first WebRTC build.
+- `entry/build-profile.json5` declares no `externalNativeOptions`, so hvigor
+  never compiles the C++ bridge: the prebuilt `libentry.so` is packaged as is.
+  Rebuilding it is a separate, rarely needed step, described at the end of this
+  section.
+- For reference: TDLib 1.8.65, tgcalls as pinned in
+  [`scripts/tgcalls/README.md`](scripts/tgcalls/README.md), ijkplayer
+  `2.0.13-pg.10` (the async-release patch is
+  `scripts/ijkplayer-pg10-async-release.patch`).
 
-**Option B — build from source (~10–15 min on a recent Mac):**
+### 2. Telegram API credentials (register your own)
 
-```bash
-# needs clang (Xcode CLT), cmake, ninja, gperf, patchelf
-export OHOS_NDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony
-bash scripts/build-tdlib.sh
-bash scripts/build-tgcalls-ohos.sh
-bash scripts/build-libvpx-ohos.sh      # → third_party/libvpx-ohos/
-bash scripts/build-rlottie-ohos.sh     # → third_party/rlottie-ohos/
-```
+This repository ships **no** `api_id`/`api_hash`, and no script that generates,
+packs or obfuscates them. TDLib cannot log in without a pair you own:
 
-`build-tdlib.sh` wraps [`ErBWs/tdlib-ohos-build`](https://github.com/ErBWs/tdlib-ohos-build)
-end to end: cross-compiles OpenSSL (static, `1_1_1w`) and TDLib (release
-**1.8.65**) for arm64-v8a, pre-generates TDLib's TL-schema sources on the host
-(required when cross-compiling), and normalises the SONAME to `libtdjson.so`
-with `patchelf` — without that last step the native bridge fails to load
-**silently**. The script is idempotent; re-running it is safe.
-
-`build-tgcalls-ohos.sh` downloads and builds WebRTC on first run, which takes a
-while. Pinned versions and current media limits are in
-[`scripts/tgcalls/README.md`](scripts/tgcalls/README.md).
-
-The libvpx and rlottie scripts produce the two static libraries that
-`libentry.so` links against; their outputs live under `third_party/` and are not
-committed either. ijkplayer ships as a `.har` under `libs/`
-(`scripts/fetch-ijkplayer.sh`); the async-release patch applied to it is
-`scripts/ijkplayer-pg10-async-release.patch`.
-
-### 2. Telegram API credentials
-
-TDLib needs your own `api_id`/`api_hash` — this repository ships none.
-
-1. Register an application at <https://my.telegram.org/apps>.
+1. Register an application at <https://my.telegram.org/apps>. The page returns an
+   `api_id` (a number) and an `api_hash` (32 hex characters).
 2. Copy `entry/src/main/ets/tdkit/ApiCredentials.template.ets` to
    `ApiCredentials.ets` in the same directory.
-3. Generate the packed constants and paste the three printed values in:
+3. Fill in the two plain-text constants of that copy:
 
-   ```bash
-   node scripts/gen-creds.mjs <api_id> <api_hash>
+   ```ts
+   export const apiId: number = 1234567;                              // your api_id
+   export const apiHash: string = '0123456789abcdef0123456789abcdef'; // your api_hash
    ```
 
-`ApiCredentials.ets` is gitignored — **never commit real credentials**; revoke
-and regenerate immediately if they leak. The packing is obfuscation, not
-encryption: it only raises the bar for casual extraction from an installed
-package.
+   The same file also carries four optional fields — `pushRelayBase`,
+   `pushRelayToken`, `crashReportBase`, `crashReportToken` — which stay empty
+   unless you run your own push relay or crash collector. Empty values simply
+   hide those features; nothing else depends on them.
+4. Build. No other file reads those values, and no build step needs network
+   access.
+
+`**/ApiCredentials.ets` is listed in `.gitignore`, so the filled-in copy cannot
+be committed by accident — **never commit real credentials**, and revoke and
+re-register immediately if they leak. Keep them out of issues, screenshots and
+logs too: they identify your application to Telegram, not your account, but they
+are not public.
 
 ### 3. Signing
 
-`signingConfigs` in `build-profile.json5` is empty. Open the project in DevEco
-Studio and use **File > Project Structure > Signing Configs > Support HarmonyOS
-Auto-Sign** (requires a Huawei developer account) to generate a local debug
-certificate. No signing material needs to be committed or shared, and no HAP
-or APP package is kept in the repository.
+`signingConfigs` in `build-profile.json5` is empty, and the repository contains no
+certificate, keystore or provisioning profile:
+
+1. Open the project in DevEco Studio.
+2. Go to **File > Project Structure > Signing Configs** and tick
+   **Automatically generate signature** (HarmonyOS auto-signing; the IDE must be
+   signed in with a Huawei developer account).
+3. Let DevEco Studio generate the debug certificate and profile for
+   `com.ohtelegram.client`. They live in your user profile, outside the
+   repository.
+
+No HAP or APP package is kept in the repository either: build output stays under
+`entry/build/`, which is gitignored.
 
 The upstream sources shipped this file with absolute paths to a local
 certificate, keystore and provisioning profile, plus the matching keystore
@@ -318,25 +321,34 @@ and never reuse a keystore or password that has been published.
 
 ### 4. Build and run
 
-Open in DevEco Studio and run on a HarmonyOS NEXT device or emulator, or:
+The whole flow is four steps in DevEco Studio:
 
-```bash
-hvigorw assembleHap --no-daemon
-```
+1. **Open the project** — `File > Open`, pick the repository root (the folder
+   holding `build-profile.json5`), and let the sync that DevEco Studio starts on
+   open finish (`ohpm install` runs as part of it).
+2. **Configure signing** as described in step 3.
+3. **Build the HAP** — `Build > Build Hap(s)/APP(s) > Build Hap(s)`, or
+   `hvigorw assembleHap --no-daemon` in a terminal where `hvigorw` is on `PATH`.
+   The output lands in `entry/build/default/outputs/default/`.
+4. **Run on the device** — connect a HarmonyOS NEXT device with USB debugging
+   enabled (or start an emulator), select it in the device selector and press
+   **Run**. The first launch asks for a phone number and the login code Telegram
+   sends; TDLib handles the rest.
 
 Because `externalNativeOptions` is not declared, this packages the prebuilt
-`libentry.so` from `entry/libs/arm64-v8a/` — it does not compile the bridge.
+`libentry.so` from `entry/libs/arm64-v8a/` — it does not compile the bridge. No
+`fetch-*` or `build-*` script has to run before, during or after the build.
 
-To (re)build the bridge: put `libvpx.a` and `librlottie.a` under `third_party/`
-first (step 1), then add an `externalNativeOptions` entry pointing at
-`entry/src/main/cpp` with `abiFilters: ["arm64-v8a"]` back into
+Optional, only after changing the C++ sources: add an `externalNativeOptions`
+entry pointing at `entry/src/main/cpp` with `abiFilters: ["arm64-v8a"]` back into
 `entry/build-profile.json5` (the CMake project and the `entry` shared target are
 still in the tree, `project(Petrelgram)`), build once so that cmake/ninja produce
 `libentry.so`, copy it into `entry/libs/arm64-v8a/`, and remove the option again.
 Keeping the bridge out of the app build is deliberate: it is a few thousand lines
 of C++ that changes rarely, while the HAP build runs many times a day.
 
-Run the test gate:
+Optional sanity check, for contributors only (needs Node.js; not part of the app
+build):
 
 ```bash
 ./scripts/run-local-tests.sh    # must print "LOCAL TESTS: PASS"

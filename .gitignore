@@ -15,12 +15,9 @@
 /.cache/
 # API credentials — never commit
 **/ApiCredentials.ets
-# Prebuilt native libraries — fetched via scripts/fetch-tdlib.sh
-entry/libs/
-# 原生产物一律不进版本库，由 scripts/build-*.sh 构建（同 entry/libs/）。
-third_party/libvpx-ohos/
-# rlottie 同理：由 scripts/build-rlottie-ohos.sh 生成（1.1MB 静态库 + 头文件）。
-third_party/rlottie-ohos/
+# 预编译原生库与静态库随仓库提供：clone 后无需再跑 scripts/fetch-libs.sh 或
+# scripts/build-*.sh（entry/libs/arm64-v8a/*.so、third_party/libvpx-ohos/、
+# third_party/rlottie-ohos/ 均已入库）。scripts/ 下的脚本仍保留，用于自行重建。
 # Local MCP config (machine-specific absolute paths)
 .mcp.json
 # Internal docs & AI tooling — not published
@@ -38,8 +35,8 @@ third_party/rlottie-ohos/
 dist/
 .codegenie/
 
-# 自编 ijkplayer 的 har（scripts/fetch-ijkplayer.sh 拉取或从 fork 编），不进版本库
-/libs/*.har
+# ijkplayer 的 har 随仓库提供（libs/ijkplayer-2.0.13-pg.10.har），无需再跑
+# scripts/fetch-ijkplayer.sh；脚本仍保留用于升级或自行编译。
 
 # ---- OHtelegram fork: local build artifacts / logs / backups (never commit) ----
 *.log

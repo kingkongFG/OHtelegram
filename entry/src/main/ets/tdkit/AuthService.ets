@@ -1,7 +1,7 @@
 import { systemLanguageForTd } from '../services/TdLanguage';
 import { TdClient } from './TdClient';
 import { TdObject, TdRequest } from './TdTypes';
-import { clientRev, clientSig } from './ApiCredentials';
+import { apiId, apiHash } from './ApiCredentials';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { str } from '../util/strings';
 import { logE, logW } from '../util/log';
@@ -475,8 +475,8 @@ export class AuthService {
     // CHECK(use_secret_chats_) 直接 abort——线上崩溃 2026-09-04 08:14 就是它。
     // 要改回 false，必须同时摘掉那个入口。
     request['use_secret_chats'] = true;
-    request['api_id'] = clientRev;
-    request['api_hash'] = clientSig;
+    request['api_id'] = apiId;
+    request['api_hash'] = apiHash;
     request['system_language_code'] = systemLanguageForTd();
     // 三项都显示在 Telegram 的「活跃会话」列表里。原来写死成 'HarmonyOS Device'
     // / '1.3.1'，发版忘了改就一直陈旧（issue #147）；现在由 Globals 从包信息和

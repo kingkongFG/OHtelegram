@@ -43,7 +43,11 @@ entry/src/main/ets/
   util/              разбор и форматирование (текст, альбомы, даты …)
 entry/src/main/cpp/  нативный мост (libentry.so → libtdjson.so / libtgcalls_ohos.so)
 entry/src/test/      модульные тесты (scripts/run-local-tests.sh)
-scripts/             сборка и загрузка TDLib/tgcalls, локальные проверки
+libs/                ijkplayer-2.0.13-pg.10.har (ссылка из oh-package.json5)
+entry/libs/arm64-v8a/ готовые libentry.so / libtdjson.so / libtgcalls_ohos.so
+third_party/         статические библиотеки libvpx-ohos/ и rlottie-ohos/
+scripts/             необязательные скрипты пересборки (TDLib, tgcalls, libvpx,
+                     rlottie, ijkplayer) и локальные проверки
 ```
 
 ## Сборка
@@ -51,80 +55,120 @@ scripts/             сборка и загрузка TDLib/tgcalls, локал�
 ### Требования
 
 - **DevEco Studio 6.0+** со встроенным OpenHarmony SDK/NDK
-- `curl` и `file` (уже есть в macOS/Linux)
+- Устройство или эмулятор HarmonyOS NEXT (arm64-v8a)
+- Аккаунт разработчика Huawei — только для шага автоматической подписи
 
-### 1. Нативные библиотеки
+Перед сборкой ничего дополнительно устанавливать не нужно: нативные библиотеки и
+пакет ijkplayer уже лежат в репозитории.
 
-TDLib и tgcalls поставляются как готовые библиотеки в `entry/libs/arm64-v8a/`
-(~50 МБ, в репозиторий не коммитятся). `libentry.so` линкуется с обеими —
-**без любой из них сборка останавливается** на ninja:
-`missing and no known rule to make it`.
+### 1. Нативные библиотеки (уже в репозитории)
 
-**Вариант A — скачать готовые (рекомендуется):**
+Всё, с чем линкуется `libentry.so`, хранится в репозитории: свежий clone ничего не
+скачивает и не собирает.
 
-```bash
-bash scripts/fetch-libs.sh [tag]   # обе библиотеки из Releases этого репозитория
-```
+| Путь | Содержимое |
+| --- | --- |
+| `entry/libs/arm64-v8a/` | `libentry.so` (мост N-API), `libtdjson.so` (~33 МБ), `libtgcalls_ohos.so` (~18 МБ) |
+| `third_party/libvpx-ohos/` | `libvpx.a` и заголовки |
+| `third_party/rlottie-ohos/` | `librlottie.a` и заголовки |
+| `libs/` | `ijkplayer-2.0.13-pg.10.har`, на него ссылается `oh-package.json5` |
 
-Без аргумента скрипт берёт последний релиз. Не возвращайтесь к «плавающему»
-тегу `tdlib-latest`: его `libtdjson.so` обновляется, а `libtgcalls_ohos.so`
-отстаёт от версионированных релизов.
+Отсюда следует:
 
-**Вариант B — собрать из исходников (10–15 минут на современном Mac):**
+- Запускать `scripts/fetch-libs.sh`, `scripts/fetch-tdlib.sh`,
+  `scripts/fetch-ijkplayer.sh`, `scripts/build-tdlib.sh`,
+  `scripts/build-tgcalls-ohos.sh`, `scripts/build-libvpx-ohos.sh` и
+  `scripts/build-rlottie-ohos.sh` **не нужно**. Эти скрипты оставлены только для
+  пересборки артефактов из исходников: требуются цепочка OHOS NDK (clang, cmake,
+  ninja, gperf, patchelf) и очень долгая первая сборка WebRTC.
+- `entry/build-profile.json5` не объявляет `externalNativeOptions`, поэтому hvigor
+  не компилирует мост на C++, а упаковывает готовый `libentry.so` как есть.
+  Пересборка моста — отдельный и редкий шаг, описан в конце раздела.
+- Для справки: TDLib 1.8.65; tgcalls — см.
+  [`scripts/tgcalls/README.md`](scripts/tgcalls/README.md); ijkplayer
+  `2.0.13-pg.10` (патч async-release —
+  `scripts/ijkplayer-pg10-async-release.patch`).
 
-```bash
-# нужны clang (Xcode CLT), cmake, ninja, gperf, patchelf
-export OHOS_NDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony
-bash scripts/build-tdlib.sh
-bash scripts/build-tgcalls-ohos.sh
-```
+### 2. Учётные данные Telegram API (регистрируете сами)
 
-`build-tdlib.sh` полностью оборачивает
-[`ErBWs/tdlib-ohos-build`](https://github.com/ErBWs/tdlib-ohos-build):
-кросс-компилирует OpenSSL (статически, `1_1_1w`) и TDLib (release **1.8.65**)
-под arm64-v8a, заранее генерирует исходники TL-схемы TDLib на хосте
-(обязательно при кросс-компиляции) и приводит SONAME к `libtdjson.so` через
-`patchelf` — без этого шага нативный мост **молча** не загружается. Скрипт
-идемпотентен, повторный запуск безопасен.
+В репозитории **нет** ни `api_id`/`api_hash`, ни скриптов, которые их генерируют,
+упаковывают или обфусцируют. Без собственной пары TDLib не сможет войти:
 
-`build-tgcalls-ohos.sh` при первом запуске скачивает и собирает WebRTC, это
-долго. Зафиксированные версии и границы возможностей — в
-[`scripts/tgcalls/README.md`](scripts/tgcalls/README.md).
-
-### 2. Учётные данные Telegram API
-
-TDLib требует ваши собственные `api_id`/`api_hash` — в репозитории их нет.
-
-1. Зарегистрируйте приложение на <https://my.telegram.org/apps>.
+1. Зарегистрируйте приложение на <https://my.telegram.org/apps>. Страница выдаст
+   `api_id` (число) и `api_hash` (32 шестнадцатеричных символа).
 2. Скопируйте `entry/src/main/ets/tdkit/ApiCredentials.template.ets` в
    `ApiCredentials.ets` в той же папке.
-3. Сгенерируйте упакованные константы и вставьте три выведенных значения:
+3. Заполните две открытые (не обфусцированные) константы в копии:
 
-   ```bash
-   node scripts/gen-creds.mjs <api_id> <api_hash>
+   ```ts
+   export const apiId: number = 1234567;                              // ваш api_id
+   export const apiHash: string = '0123456789abcdef0123456789abcdef'; // ваш api_hash
    ```
 
-`ApiCredentials.ets` в gitignore — **никогда не коммитьте реальные ключи**; при
-утечке немедленно отзовите и создайте новые. Упаковка — это обфускация, а не
-шифрование: она лишь усложняет извлечение из установленного пакета.
+   В том же файле есть четыре необязательных поля — `pushRelayBase`,
+   `pushRelayToken`, `crashReportBase`, `crashReportToken`: они остаются пустыми,
+   если вы не используете собственный push-релей или приёмник отчётов о падениях.
+   Пустое значение просто скрывает соответствующую функцию, больше ничего от них
+   не зависит.
+4. Собирайте. Никакой другой файл эти значения не читает, и ни один шаг сборки не
+   требует сети.
+
+`**/ApiCredentials.ets` внесён в `.gitignore`, поэтому заполненная копия не попадёт
+в коммит случайно — **никогда не коммитьте реальные ключи**; при утечке немедленно
+отзовите и зарегистрируйте новые. Не публикуйте их и в issue, скриншотах и логах:
+они идентифицируют ваше приложение, а не аккаунт, но публичными быть не должны.
 
 ### 3. Подпись
 
-`signingConfigs` в `build-profile.json5` пуст. Откройте проект в DevEco Studio и
-используйте **File > Project Structure > Signing Configs > Support HarmonyOS
-Auto-Sign** (нужен аккаунт разработчика Huawei), чтобы создать локальный
-отладочный сертификат. Никакие материалы подписи коммитить не нужно.
+`signingConfigs` в `build-profile.json5` пуст, в репозитории нет ни сертификата, ни
+keystore, ни provisioning profile:
+
+1. Откройте проект в DevEco Studio.
+2. Перейдите в **File > Project Structure > Signing Configs** и включите
+   **Automatically generate signature** (автоматическая подпись HarmonyOS; IDE
+   должна быть авторизована в аккаунте разработчика Huawei).
+3. DevEco Studio создаст отладочный сертификат и профиль для
+   `com.ohtelegram.client`. Они хранятся в профиле пользователя, вне репозитория.
+
+Пакеты HAP и APP в репозитории тоже не хранятся: результат сборки остаётся в
+`entry/build/`, а этот путь в gitignore.
+
+Исходные файлы апстрима содержали абсолютные пути к локальному сертификату,
+keystore и профилю, а также пароль keystore — открытым текстом в репозитории. Этот
+форк удалил всё перечисленное. Если вы собираете из апстрима, считайте эти значения
+скомпрометированными: создайте собственный сертификат и никогда не используйте
+опубликованные keystore или пароль.
 
 ### 4. Сборка и запуск
 
-Откройте проект в DevEco Studio и запустите на устройстве или эмуляторе
-HarmonyOS NEXT, либо:
+Весь путь — четыре шага в DevEco Studio:
 
-```bash
-hvigorw assembleHap --no-daemon
-```
+1. **Открыть проект** — `File > Open`, выберите корень репозитория (папку с
+   `build-profile.json5`) и дождитесь синхронизации, которую IDE запускает при
+   открытии (в неё входит `ohpm install`).
+2. **Настроить подпись** — см. шаг 3 выше.
+3. **Собрать HAP** — `Build > Build Hap(s)/APP(s) > Build Hap(s)`, либо
+   `hvigorw assembleHap --no-daemon` в терминале, где `hvigorw` есть в `PATH`.
+   Результат появится в `entry/build/default/outputs/default/`.
+4. **Запустить на устройстве** — подключите устройство HarmonyOS NEXT с включённой
+   отладкой по USB (или запустите эмулятор), выберите его в списке устройств и
+   нажмите **Run**. При первом запуске приложение попросит номер телефона и код от
+   Telegram; остальное сделает TDLib.
 
-Проверка перед коммитом:
+Поскольку `externalNativeOptions` не объявлен, этот путь упаковывает готовый
+`libentry.so` из `entry/libs/arm64-v8a/` и не компилирует мост. Ни до, ни во время,
+ни после сборки никакие скрипты `fetch-*` / `build-*` запускать не нужно.
+
+Необязательно и только после правки исходников C++: верните в
+`entry/build-profile.json5` запись `externalNativeOptions`, указывающую на
+`entry/src/main/cpp` с `abiFilters: ["arm64-v8a"]` (CMake-проект и общая цель
+`entry` по-прежнему в дереве, `project(Petrelgram)`), соберите один раз, чтобы
+cmake/ninja создали `libentry.so`, скопируйте его в `entry/libs/arm64-v8a/` и
+уберите опцию. Мост выведен из сборки приложения намеренно: это несколько тысяч
+строк C++, которые меняются редко, а HAP собирается по несколько раз в день.
+
+Необязательная проверка, только для контрибьюторов (нужен Node.js; к сборке
+приложения не относится):
 
 ```bash
 ./scripts/run-local-tests.sh    # должно вывести "LOCAL TESTS: PASS"
